@@ -1,29 +1,30 @@
-FROM node:22-alpine AS build-stage
+# Build stage: use Maven with Java 21 to compile the app
+FROM maven:3.9-eclipse-temurin-21 AS build
 
+# Set working directory inside the build container
 WORKDIR /app
 
-COPY package*.json ./
+# Copy Maven project file to resolve dependencies
+COPY pom.xml .
 
-RUN npm ci
+# Copy source code into the container
+COPY src ./src
 
-COPY . .
+# Package the app into a JAR, skipping tests for faster builds
+RUN mvn package -DskipTests
 
-# Build with placeholder values that will be replaced at runtime
-RUN VITE_GRAPHQL_URI=__VITE_GRAPHQL_URI_PLACEHOLDER__ \
-    VITE_SERVER_URI=__VITE_SERVER_URI_PLACEHOLDER__ \
-    npm run build -- --mode production
 
-# Production stage
-FROM nginx:alpine AS production-stage
+# Runtime stage: use a lightweight JRE-only image
+FROM eclipse-temurin:21-jre
 
-COPY nginx-custom.conf /etc/nginx/conf.d/default.conf
+# Set working directory for the runtime container
+WORKDIR /app
 
-COPY --from=build-stage /app/dist /usr/share/nginx/html
+# Copy only the built JAR from the build stage (keeps image small)
+COPY --from=build /app/target/backend.jar app.jar
 
-# Script that replaces placeholders with runtime env vars, then starts nginx
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
-
+# Expose port 8080 for incoming traffic
 EXPOSE 8080
 
-ENTRYPOINT ["/docker-entrypoint.sh"]
+# Run the JAR when the container starts
+ENTRYPOINT ["java", "-jar", "app.jar"]
